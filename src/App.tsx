@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -20,39 +20,41 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import {
-  getAlerts,
-  ingredients,
-  initialRobots,
-  money,
-  statusLabel,
-  type Robot,
-} from "./data";
+import { getAlerts, ingredients, money, statusLabel } from "./data";
 import { Chart } from "./components/Chart";
 import { RobotTable } from "./components/RobotTable";
 import { Stat, PanelHeading, StockRow } from "./components/ui";
-type Page = "Tổng quan" | "Quản lý robot" | "Tồn kho nguyên liệu" | "Cảnh báo";
-function readRobots(): Robot[] {
-  try {
-    const value = JSON.parse(localStorage.getItem("cukcuk-v1") || "null");
-    if (
-      Array.isArray(value) &&
-      value.length === initialRobots.length &&
-      value.every(
-        (r: Robot) =>
-          initialRobots.some((s) => s.id === r.id) &&
-          Array.isArray(r.stock) &&
-          r.stock.length === 4 &&
-          r.stock.every((v) => typeof v === "number" && v >= 0 && v <= 100) &&
-          ["online", "offline", "error"].includes(r.status),
-      )
-    )
-      return value;
-  } catch {}
-  return initialRobots;
-}
+import {
+  availableStock,
+  salesMetrics,
+  inPeriod,
+  STORAGE_KEY,
+  transition,
+  type Command,
+} from "./sales";
+import { loadState } from "./storage";
+import { CustomerShop, SaleDetail } from "./components/CustomerShop";
+type Page =
+  | "Tổng quan"
+  | "Quản lý robot"
+  | "Tồn kho nguyên liệu"
+  | "Cảnh báo"
+  | "Khách mua cà phê"
+  | "Đơn hàng"
+  | "Báo cáo";
 export default function App() {
-  const [robots, setRobots] = useState<Robot[]>(readRobots);
+  const [store, dispatch] = useReducer(
+    (
+      current: { state: ReturnType<typeof loadState>; error?: string },
+      command: Command,
+    ) => transition(current.state, command),
+    undefined,
+    () => ({ state: loadState(), error: undefined }),
+  );
+  const state = store.state;
+  const robots = state.robots;
+  const send = (command: Command) => dispatch(command);
+  const [storageError, setStorageError] = useState("");
   const [page, setPage] = useState<Page>("Tổng quan");
   const [city, setCity] = useState("Tất cả khu vực");
   const [period, setPeriod] = useState("Hôm nay");
@@ -67,8 +69,15 @@ export default function App() {
   const [ack, setAck] = useState<string[]>([]);
   const [alertTab, setAlertTab] = useState("all");
   useEffect(() => {
-    localStorage.setItem("cukcuk-v1", JSON.stringify(robots));
-  }, [robots]);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      setStorageError("");
+    } catch {
+      setStorageError(
+        "Không lưu được dữ liệu trên trình duyệt. Hãy giữ trang mở; thay đổi có thể mất khi tải lại.",
+      );
+    }
+  }, [state]);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(""), 3500);
@@ -97,9 +106,38 @@ export default function App() {
   const alerts = getAlerts(scoped);
   const multiplier =
     period === "Hôm nay" ? 1 : period === "7 ngày qua" ? 7 : 30;
-  const revenue = scoped.reduce((a, r) => a + r.revenue, 0) * multiplier;
-  const orders = scoped.reduce((a, r) => a + r.orders, 0) * multiplier;
-  const robot = robots.find((r) => r.id === selected);
+  const periodRobots = robots.map((r) => {
+    const metrics = salesMetrics(
+      state.sales.filter((o) => o.robotId === r.id),
+      period,
+    );
+    return {
+      ...r,
+      revenue: r.revenue * multiplier + metrics.revenue,
+      orders: r.orders * multiplier + metrics.completedOrders,
+    };
+  });
+  const displayRobots = periodRobots.filter((r) =>
+    visible.some((v) => v.id === r.id),
+  );
+  const scopedDisplay = periodRobots.filter((r) =>
+    scoped.some((v) => v.id === r.id),
+  );
+  const revenue = scopedDisplay.reduce((a, r) => a + r.revenue, 0);
+  const orders = scopedDisplay.reduce((a, r) => a + r.orders, 0);
+  const robot = periodRobots.find((r) => r.id === selected);
+  const scopedSales = state.sales.filter(
+    (o) => city === "Tất cả khu vực" || o.city === city,
+  );
+  const metrics = salesMetrics(scopedSales, period);
+  const periodSales = scopedSales.filter((o) => {
+    // Include orders with any activity in the selected reporting window.
+    return (
+      inPeriod(o.createdAt, period) ||
+      (!!o.paidAt && inPeriod(o.paidAt, period)) ||
+      o.cups.some((c) => c.finishedAt && inPeriod(c.finishedAt, period))
+    );
+  });
   const navigate = (p: Page) => {
     setPage(p);
     setSelected(null);
@@ -108,14 +146,43 @@ export default function App() {
   };
   function exportCsv() {
     const rows = [
-      ["Robot", "Điểm bán", "Khu vực", "Trạng thái", "Đơn hàng", "Doanh thu"],
-      ...visible.map((r) => [
+      [
+        "Dữ liệu giả lập",
+        "Kỳ: " + period,
+        "VND",
+        "Asia/Ho_Chi_Minh",
+        "Nền lịch sử minh họa + đơn mô phỏng thực tế trong kỳ",
+      ],
+      [
+        "Robot",
+        "Điểm bán",
+        "Khu vực",
+        "Trạng thái",
+        "Đơn hoàn tất",
+        "Doanh thu ly thành công",
+        "Tiền thu đơn mới",
+        "Cần hoàn đơn mới",
+        "Doanh thu đơn mới",
+      ],
+      ...displayRobots.map((r) => [
         r.id,
         r.name,
         r.city,
         statusLabel[r.status],
-        r.orders * multiplier,
-        r.revenue * multiplier,
+        r.orders,
+        r.revenue,
+        salesMetrics(
+          state.sales.filter((o) => o.robotId === r.id),
+          period,
+        ).captured,
+        salesMetrics(
+          state.sales.filter((o) => o.robotId === r.id),
+          period,
+        ).refundRequired,
+        salesMetrics(
+          state.sales.filter((o) => o.robotId === r.id),
+          period,
+        ).revenue,
       ]),
     ];
     const url = URL.createObjectURL(
@@ -176,6 +243,9 @@ export default function App() {
               [Bot, "Quản lý robot"],
               [Box, "Tồn kho nguyên liệu"],
               [Bell, "Cảnh báo"],
+              [Coffee, "Khách mua cà phê"],
+              [ShoppingBag, "Đơn hàng"],
+              [Wallet, "Báo cáo"],
             ] as const
           ).map(([Icon, label]) => (
             <button
@@ -230,6 +300,11 @@ export default function App() {
           </div>
         </header>
         <main>
+          {(store.error || storageError) && (
+            <p className="purchase-warning" role="alert">
+              {store.error || storageError}
+            </p>
+          )}
           <div className="page-heading">
             <div>
               <div className="eyebrow">
@@ -251,7 +326,13 @@ export default function App() {
                       ? "Theo dõi và quản lý các robot trong chuỗi của bạn."
                       : page === "Tồn kho nguyên liệu"
                         ? "Chủ động bổ sung để mỗi ly cà phê luôn sẵn sàng."
-                        : "Theo dõi sự cố và những điểm bán cần được chú ý."}
+                        : page === "Khách mua cà phê"
+                          ? "Chọn món, mô phỏng thanh toán và theo dõi từng ly."
+                          : page === "Đơn hàng"
+                            ? "Theo dõi đơn, thanh toán, kết quả pha và khoản cần hoàn."
+                            : page === "Báo cáo"
+                              ? "Doanh thu, tiền thu và hoàn tiền từ cùng một nguồn dữ liệu."
+                              : "Theo dõi sự cố và những điểm bán cần được chú ý."}
               </p>
             </div>
             <button className="button" onClick={exportCsv}>
@@ -294,6 +375,10 @@ export default function App() {
               <span className="live-dot" /> Bản mô phỏng · 31/10/2026
             </span>
           </div>
+          <p className="simulation-note">
+            Dữ liệu giả lập · Nền lịch sử minh họa; đơn mới tính theo thời gian
+            phát sinh (giờ Việt Nam), không nhân theo kỳ.
+          </p>
           {robot ? (
             <>
               <button
@@ -318,19 +403,19 @@ export default function App() {
               <div className="stats three">
                 <Stat
                   title="Doanh thu robot"
-                  value={money(robot.revenue * multiplier)}
+                  value={money(robot.revenue)}
                   icon={<Wallet size={20} />}
                   note={period}
                 />
                 <Stat
                   title="Đơn hàng thành công"
-                  value={(robot.orders * multiplier).toLocaleString("vi-VN")}
+                  value={robot.orders.toLocaleString("vi-VN")}
                   icon={<ShoppingBag size={20} />}
                   note={period}
                 />
                 <Stat
                   title="Giá trị trung bình / đơn"
-                  value={money(robot.revenue / robot.orders)}
+                  value={money(robot.orders ? robot.revenue / robot.orders : 0)}
                   icon={<Coffee size={20} />}
                   note="Theo dữ liệu mô phỏng"
                 />
@@ -340,7 +425,7 @@ export default function App() {
                   title="Doanh thu theo thời gian"
                   subtitle="Đơn vị: triệu đồng"
                 />
-                <Chart period={period} base={robot.revenue * multiplier} />
+                <Chart period={period} base={robot.revenue} />
               </section>
               <section className="panel inventory-detail">
                 <PanelHeading
@@ -359,6 +444,70 @@ export default function App() {
             </>
           ) : (
             <>
+              {page === "Khách mua cà phê" && (
+                <CustomerShop state={state} send={send} />
+              )}
+              {page === "Đơn hàng" && (
+                <section aria-label="Danh sách đơn hàng">
+                  <p>
+                    Đơn giả lập theo khu vực và kỳ đang chọn. Có thể tiếp tục
+                    thanh toán/pha sau khi tải lại trang.
+                  </p>
+                  {periodSales.length ? (
+                    [...periodSales]
+                      .reverse()
+                      .map((order) => (
+                        <SaleDetail key={order.id} order={order} send={send} />
+                      ))
+                  ) : (
+                    <div className="empty">Chưa có đơn mô phỏng trong kỳ.</div>
+                  )}
+                </section>
+              )}
+              {(page === "Tổng quan" || page === "Báo cáo") && (
+                <section
+                  className="panel sales-summary"
+                  aria-label="Báo cáo đơn mô phỏng"
+                >
+                  <h2>Đơn mua cà phê mô phỏng · {period}</h2>
+                  <div className="sales-numbers">
+                    <p>
+                      Doanh thu ly thành công
+                      <strong>{money(metrics.revenue)}</strong>
+                    </p>
+                    <p>
+                      Tiền đã thanh toán
+                      <strong>{money(metrics.captured)}</strong>
+                    </p>
+                    <p>
+                      Cần xử lý hoàn tiền
+                      <strong>{money(metrics.refundRequired)}</strong>
+                    </p>
+                    <p>
+                      Đơn hoàn tất / Ly thành công
+                      <strong>
+                        {metrics.completedOrders} / {metrics.cups}
+                      </strong>
+                    </p>
+                  </div>
+                  <p>
+                    Tiền đã thanh toán chưa phải doanh thu nếu ly chưa pha thành
+                    công. Khoản cần hoàn chưa được chi trả.
+                  </p>
+                </section>
+              )}
+              {page === "Báo cáo" && (
+                <section className="panel">
+                  <PanelHeading
+                    title="Báo cáo theo robot"
+                    subtitle="Cùng nguồn số liệu với dashboard và CSV; bao gồm nền lịch sử minh họa."
+                  />
+                  <RobotTable
+                    robots={displayRobots}
+                    onSelect={(r) => setSelected(r.id)}
+                  />
+                </section>
+              )}
               {page === "Tổng quan" && (
                 <>
                   <div className="stats">
@@ -512,9 +661,8 @@ export default function App() {
                     </label>
                   </div>
                   <RobotTable
-                    robots={visible}
+                    robots={displayRobots}
                     onSelect={(r) => setSelected(r.id)}
-                    multiplier={multiplier}
                   />
                   <div className="table-footer">
                     Hiển thị {visible.length} / {scoped.length} robot{" "}
@@ -557,6 +705,10 @@ export default function App() {
                             </small>
                           </div>
                         </div>
+                        <p className="stock-available">
+                          Khả dụng sau giữ chỗ:{" "}
+                          {availableStock(state, r.id).join(" / ")}%
+                        </p>
                         {r.stock.map((v, i) => (
                           <StockRow
                             key={i}
@@ -594,6 +746,21 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                  {state.incidents
+                    .filter((i) => scoped.some((r) => r.id === i.robotId))
+                    .map((i) => (
+                      <div className="alert-row" key={i.id}>
+                        <Activity size={21} />
+                        <div>
+                          <strong>Sự cố pha chế</strong>
+                          <p>{i.message}</p>
+                          <p>
+                            Robot {i.robotId} · Đơn {i.orderId} · Cần xử lý hoàn
+                            tiền, chưa tự khôi phục robot.
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   {alerts
                     .filter((a) => alertTab === "all" || a.kind === alertTab)
                     .map((a) => (
@@ -694,18 +861,12 @@ export default function App() {
                 e.preventDefault();
                 if (!Number.isFinite(amount) || amount <= 0 || amount > 100)
                   return;
-                setRobots(
-                  robots.map((r) =>
-                    r.id === refill.id
-                      ? {
-                          ...r,
-                          stock: r.stock.map((v, i) =>
-                            i === refill.index ? Math.min(100, v + amount) : v,
-                          ),
-                        }
-                      : r,
-                  ),
-                );
+                send({
+                  type: "refill",
+                  robotId: refill.id,
+                  index: refill.index,
+                  amount,
+                });
                 setRefill(null);
                 setToast("Đã cập nhật tồn kho nguyên liệu");
               }}

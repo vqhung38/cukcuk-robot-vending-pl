@@ -45,7 +45,7 @@ describe("MVP operations", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Xác nhận bổ sung" }));
     expect(screen.queryByText("Sữa tươi sắp hết")).toBeNull();
-    expect(JSON.parse(localStorage.getItem("cukcuk-v1")!)[1].stock[1]).toBe(48);
+    expect(JSON.parse(localStorage.getItem("cukcuk-v2")!).robots[1].stock[1]).toBe(48);
     cleanup();
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /^Cảnh báo/ }));
