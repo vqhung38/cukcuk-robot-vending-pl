@@ -250,3 +250,7 @@ Bảng dưới đảm bảo không bỏ PBI vì thiếu ID/phiên bản. Tiêu �
 ## Bằng chứng cho lát cắt mua cà phê
 
 Lát cắt hiện tại có test tự động trong `src/sales.test.ts` (23 ca logic), `src/CustomerFlow.test.tsx` (7 ca tích hợp), `tests/customer-browser.cjs` (4 nhánh trình duyệt). Đây là kiểm chứng một phần AC-SC-02.01…04, AC-SC-03.01 và AC-X01/04/05: happy path, payment fail, từng ly lỗi/hoàn cần xử lý, chống xử lý trùng, reserve/consume, reload và báo cáo. Không đánh dấu toàn bộ AC tương ứng đã đạt: ưu đãi/HĐĐT/ZNS/rebrew/refund execution/Edge–Cloud thật chưa hỗ trợ. Các AC nền tảng khác vẫn unrun. Xem README để chạy lại và đọc giới hạn.
+
+## Bằng chứng vertical slices vận hành và tài chính
+
+`src/platform.test.ts`, `src/PlatformFlow.test.tsx` và `tests/platform-browser.cjs` kiểm một phần AC-SC-07.01/02 (incident→ticket→verified recovery/history), AC-SC-04.03 (capture/refund/sao kê/chênh lệch/chốt/bổ sung) và AC-X01/03/04/05 (luồng mua không hồi quy, quyền/scope/export/tổng hợp). Không đánh dấu toàn bộ Scenario đạt: camera/SLA, payroll/P&L, HĐĐT và tích hợp thật chưa làm. Xem [phạm vi, giả định và test](OPERATIONS_FINANCE_SLICES.md).

@@ -85,11 +85,17 @@ Test mới bao phủ transition, offline/error, tồn không đủ/đúng ngư�
 ### Giả định và giới hạn của lát cắt hiện tại
 
 - BOM giả dùng **điểm phần trăm sức chứa**, không phải gram/ml: đen `[2,0,1,1]`, sữa `[2,3,1,1]`, latte `[2,5,1,1]` theo thứ tự cà phê/sữa/siro/ly. Giá lần lượt 30.000/35.000/45.000 VND. Chưa tính thuế, ưu đãi, COGS hoặc hóa đơn.
-- Doanh thu demo ghi nhận theo **ly pha thành công**, coi như đã giao; đơn chỉ hoàn tất khi mọi ly thành công. Đơn một phần có doanh thu ly tốt nhưng không tăng số đơn hoàn tất. Tiền đã thu và khoản cần hoàn hiển thị riêng; chưa tự thực hiện hoàn tiền.
-- Ly lỗi không trừ tồn trong lát cắt này; hao hụt thực tế cần quy tắc bổ sung. Robot được đánh dấu error để chặn đơn mới; kết quả các ly đã bắt đầu trong cùng lượt mô phỏng vẫn có thể xác nhận riêng. Chưa có UI sửa lỗi/khôi phục robot.
-- Mỗi robot chỉ bắt đầu một đơn tại một thời điểm. Giữ chỗ từ lúc tạo đơn đến khi có kết quả payment/pha; chưa có hủy/TTL tự giải phóng, retry payment, rebrew/voucher hoặc timeout/unknown. Có thể tiếp tục đơn còn mở qua mục Đơn hàng.
+- Doanh thu demo ghi nhận theo **ly pha thành công**, coi như đã giao; đơn chỉ hoàn tất khi mọi ly thành công. Đơn một phần có doanh thu ly tốt nhưng không tăng số đơn hoàn tất. Tiền đã thu và khoản cần hoàn hiển thị riêng; hoàn tiền có workflow giả lập riêng, không chi tiền thật.
+- Ly lỗi không trừ tồn trong lát cắt này; hao hụt thực tế cần quy tắc bổ sung. Robot được đánh dấu error để chặn đơn mới; kết quả các ly đã bắt đầu trong cùng lượt mô phỏng vẫn có thể xác nhận riêng. Đã có workflow phiếu/khôi phục ở mục Vận hành robot.
+- Mỗi robot chỉ bắt đầu một đơn tại một thời điểm. Giữ chỗ từ lúc tạo đơn đến khi có kết quả payment/pha; chưa có hủy/TTL tự giải phóng, retry payment, rebrew/voucher; đã có payment unknown và xác minh. Có thể tiếp tục đơn còn mở qua mục Đơn hàng.
 - `cukcuk-v2` lưu **một snapshot** robot/đơn/sự cố trong localStorage; lần đầu nhập tồn từ `cukcuk-v1`, không cập nhật lại khóa v1. Không hỗ trợ đồng bộ nhiều tab/người dùng, backend, phân quyền production hoặc chống sửa localStorage. Dữ liệu không hợp lệ khôi phục fixture demo; không dùng làm sổ cái thật.
 - Đơn mới lọc theo thời gian phát sinh giờ Việt Nam và chỉ cộng một lần ở kỳ 1/7/30 ngày. Nền lịch sử cũ vẫn là tổng minh họa (nhân ngày theo kỳ); biểu đồ phân bổ minh họa, không phải lịch sử giao dịch thật. Báo cáo có khối riêng chỉ tính đơn mua mô phỏng, CSV tách cột tiền thu/cần hoàn/doanh thu đơn mới.
 - Chưa có giỏ nhiều loại đồ uống trong một đơn, tích hợp robot/thanh toán/HĐĐT/ZNS thật, nhận ly bằng cảm biến, tồn lô/HSD, đối soát ngân hàng/P&L hoặc các luồng nền tảng còn lại. Đây là lát cắt mô phỏng, không nghiệm thu toàn bộ SC-02.01…04.
 
 Để chạy demo sạch, dùng phiên trình duyệt riêng mới; hoặc chủ động xóa **cả** `cukcuk-v2` và `cukcuk-v1` trong bộ nhớ trang rồi tải lại (xóa toàn bộ đơn/tồn demo đã lưu).
+
+## Vertical slices vận hành và tài chính
+
+Đã bổ sung **Vận hành robot**, **Đối soát** và bộ chọn **Vai trò demo**. Workflow sự cố/phiếu/khôi phục, payment unknown, refund fail/retry/success, tổng hợp robot–điểm–chuỗi, kỳ/chênh lệch/chốt/bổ sung và quyền nằm trong [hướng dẫn chi tiết](docs/OPERATIONS_FINANCE_SLICES.md). Tài liệu cũng liệt kê các quy tắc tài chính cần doanh nghiệp xác nhận trước production.
+
+Test thêm: `PLAYWRIGHT_MODULE=/opt/codex/cua_node/lib/node_modules/playwright node tests/platform-browser.cjs` (chạy Vite trước). Quyền chỉ mô phỏng phía trình duyệt, dữ liệu vẫn giả lập và lưu localStorage; không dùng cho tài chính thật.

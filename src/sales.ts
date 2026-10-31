@@ -1,3 +1,5 @@
+import { robotScope, type Scope } from "./access";
+import type { PlatformData } from "./platformTypes";
 import { initialRobots, type Robot } from "./data";
 
 export const drinks = [
@@ -15,6 +17,8 @@ export type Sale = {
   robotId: string;
   robotName: string;
   city: string;
+  scope?: Scope;
+  paymentId?: string;
   drink: string;
   unitPrice: number;
   bom: number[];
@@ -23,7 +27,7 @@ export type Sale = {
   createdAt: string;
   paidAt?: string;
   finishedAt?: string;
-  payment: "pending" | "succeeded" | "failed";
+  payment: "pending" | "succeeded" | "failed" | "unknown";
   status:
     | "awaiting_payment"
     | "paid"
@@ -33,7 +37,7 @@ export type Sale = {
     | "partially_fulfilled"
     | "payment_failed";
   cups: Cup[];
-  refund: "none" | "required";
+  refund: "none" | "required" | "refunded";
   refundAmount: number;
 };
 export type Incident = {
@@ -49,6 +53,7 @@ export type SalesState = {
   robots: Robot[];
   sales: Sale[];
   incidents: Incident[];
+  platform?: PlatformData;
 };
 export const STORAGE_KEY = "cukcuk-v2";
 export const freshState = (robots: Robot[] = initialRobots): SalesState => ({
@@ -131,6 +136,8 @@ export function transition(
       robotId: robot.id,
       robotName: robot.name,
       city: robot.city,
+      scope: robotScope(robot.id),
+      paymentId: `PAY-${command.id}`,
       drink: drink.name,
       unitPrice: drink.price,
       bom: [...drink.bom],
@@ -191,7 +198,7 @@ export function transition(
     },
   });
   if (command.type === "payment") {
-    if (order.payment !== "pending")
+    if (order.payment !== "pending" && order.payment !== "unknown")
       return command.success === (order.payment === "succeeded")
         ? { state }
         : reject("Thanh toán đã có kết quả, không thể ghi đè.");

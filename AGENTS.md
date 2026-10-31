@@ -43,4 +43,12 @@
 - `src/sales.ts` là nguồn transition và selector chung; giữ nguyên liệu khả dụng bằng tồn thực trừ giữ chỗ các ly còn mở. Không tạo bộ đếm doanh thu/tồn phụ ở component.
 - `cukcuk-v2` lưu snapshot thống nhất, migration đọc khóa v1 khi chưa có v2. Đơn/ly giữ ID và BOM/giá snapshot; kết quả cuối không bị ghi đè hoặc tiêu hao hai lần.
 - Test mới: `src/sales.test.ts`, `src/CustomerFlow.test.tsx`; Chromium: `tests/customer-browser.cjs` (success/payment-failure/brew-failure/partial). Chạy cùng regression hiện có.
-- Đơn pha lỗi chỉ đánh dấu cần hoàn, chưa thực hiện refund. Đơn chỉ hoàn tất khi mọi ly tốt; doanh thu từng ly tốt và tiền capture là hai chỉ tiêu riêng. Giới hạn/giả định tại README; không tự tuyên bố hoàn tất toàn bộ AC-SC từ lát cắt này.
+- Đơn pha lỗi tạo nghĩa vụ hoàn; slice mới có workflow refund giả lập, chỉ succeeded giảm thu ròng, không chi tiền thật. Đơn chỉ hoàn tất khi mọi ly tốt; doanh thu từng ly tốt và tiền capture là hai chỉ tiêu riêng. Giới hạn/giả định tại README; không tự tuyên bố hoàn tất toàn bộ AC-SC từ lát cắt này.
+
+## Vertical slices vận hành và đối soát
+
+- Người dùng đã cho phép triển khai hai slice này. Đọc `docs/OPERATIONS_FINANCE_SLICES.md` cho quyền, giả định, công thức, luồng demo và quyết định production còn mở.
+- Mọi lệnh UI đi qua `execute` trong `platform.ts` với actor/scope; dữ liệu component/CSV qua `scopedState`. Provider không có dữ liệu tiền; Manager chỉ phạm vi được giao; Owner chỉ đọc vận hành và được mô phỏng tài chính theo giả định demo. Backend auth chưa triển khai.
+- Không tự nhận mọi capture là tiền đối soát. Chỉ closed với từng dòng matched/received mới cộng; closed bất biến, late transaction vào batch bổ sung và không ghi lại capture cũ. Tất cả tổng hợp dùng selector chung.
+- Khôi phục cần ticket đã phân công/đang xử lý, kết quả và kiểm tra đạt; không còn đơn đang pha hoặc incident chưa giải quyết khác. Khôi phục không sửa kết quả đơn hoặc nghĩa vụ hoàn tiền.
+- Chạy toàn bộ `npm test`, `npm run build` và cả ba script Chromium (`browser.cjs`, `customer-browser.cjs`, `platform-browser.cjs`) trước khi kết thúc thay đổi liên quan. Không coi test mock là nghiệm thu production hoặc đầy đủ mọi AC của workbook.

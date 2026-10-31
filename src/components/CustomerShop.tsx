@@ -1,3 +1,4 @@
+import type { PlatformCommand } from "../platform";
 import { useState } from "react";
 import { ingredients, money, statusLabel } from "../data";
 import {
@@ -6,7 +7,6 @@ import {
   drinks,
   orderLabels,
   purchaseError,
-  type Command,
   type Sale,
   type SalesState,
 } from "../sales";
@@ -14,9 +14,13 @@ import {
 export function SaleDetail({
   order,
   send,
+  canSimulate = true,
+  refundRemaining,
 }: {
   order: Sale;
-  send: (c: Command) => void;
+  send: (c: PlatformCommand) => void;
+  canSimulate?: boolean;
+  refundRemaining?: number;
 }) {
   const at = () => new Date().toISOString();
   return (
@@ -39,40 +43,61 @@ export function SaleDetail({
           ? "Thành công (giả lập)"
           : order.payment === "failed"
             ? "Thất bại"
-            : "Chờ kết quả"}
+            : order.payment === "unknown"
+              ? "Chưa xác định · cần xác minh"
+              : "Chờ kết quả"}
       </p>
       {order.refund === "required" && (
         <p className="purchase-warning" role="alert">
-          Cần xử lý hoàn tiền: {money(order.refundAmount)}. Chưa hoàn tiền.
+          Cần xử lý hoàn tiền: {money(refundRemaining ?? order.refundAmount)}.
+          Chưa hoàn tiền.
         </p>
       )}
+      {order.refund === "refunded" && <p>Đã hoàn tiền thành công (giả lập).</p>}
+      <p>Mã thanh toán: {order.paymentId ?? `PAY-${order.id}`}</p>
       <div className="sale-actions">
-        {order.payment === "pending" && (
-          <>
-            <button
-              className="button primary"
-              onClick={() =>
-                send({ type: "payment", id: order.id, success: true, at: at() })
-              }
-            >
-              Thanh toán thành công
-            </button>
-            <button
-              className="button"
-              onClick={() =>
-                send({
-                  type: "payment",
-                  id: order.id,
-                  success: false,
-                  at: at(),
-                })
-              }
-            >
-              Thanh toán thất bại
-            </button>
-          </>
-        )}
-        {order.status === "paid" && (
+        {canSimulate &&
+          (order.payment === "pending" || order.payment === "unknown") && (
+            <>
+              {order.payment === "pending" && (
+                <button
+                  className="button"
+                  onClick={() =>
+                    send({ type: "payment_unknown", id: order.id, at: at() })
+                  }
+                >
+                  Thanh toán chưa xác định
+                </button>
+              )}
+              <button
+                className="button primary"
+                onClick={() =>
+                  send({
+                    type: "payment",
+                    id: order.id,
+                    success: true,
+                    at: at(),
+                  })
+                }
+              >
+                Thanh toán thành công
+              </button>
+              <button
+                className="button"
+                onClick={() =>
+                  send({
+                    type: "payment",
+                    id: order.id,
+                    success: false,
+                    at: at(),
+                  })
+                }
+              >
+                Thanh toán thất bại
+              </button>
+            </>
+          )}
+        {canSimulate && order.status === "paid" && (
           <button
             className="button primary"
             onClick={() => send({ type: "start", id: order.id, at: at() })}
@@ -87,7 +112,7 @@ export function SaleDetail({
             <span>
               Ly {i + 1}/{order.quantity} · {cupLabels[cup.status]}
             </span>
-            {cup.status === "brewing" && (
+            {canSimulate && cup.status === "brewing" && (
               <div className="sale-actions">
                 <button
                   className="button"
@@ -130,7 +155,7 @@ export function CustomerShop({
   send,
 }: {
   state: SalesState;
-  send: (c: Command) => void;
+  send: (c: PlatformCommand) => void;
 }) {
   const [robotId, setRobotId] = useState(
     state.robots.find((r) => r.status === "online")?.id || "",

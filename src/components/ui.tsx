@@ -54,10 +54,12 @@ export function StockRow({
   name,
   value,
   onRefill,
+  canRefill = true,
 }: {
   name: string;
   value: number;
   onRefill: () => void;
+  canRefill?: boolean;
 }) {
   return (
     <div className="stock-row">
@@ -66,6 +68,7 @@ export function StockRow({
         <strong className={value < 25 ? "low" : ""}>{value}%</strong>
         <button
           className="text-button"
+          disabled={!canRefill}
           aria-label={"Bổ sung " + name}
           onClick={onRefill}
         >

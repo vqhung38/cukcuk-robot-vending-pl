@@ -24,14 +24,24 @@ import { getAlerts, ingredients, money, statusLabel } from "./data";
 import { Chart } from "./components/Chart";
 import { RobotTable } from "./components/RobotTable";
 import { Stat, PanelHeading, StockRow } from "./components/ui";
+import { availableStock, salesMetrics, inPeriod, STORAGE_KEY } from "./sales";
 import {
-  availableStock,
-  salesMetrics,
-  inPeriod,
-  STORAGE_KEY,
-  transition,
-  type Command,
-} from "./sales";
+  canFinance,
+  canOperate,
+  profiles,
+  scopedState,
+  robotScope,
+} from "./access";
+import {
+  execute,
+  aggregateFinance,
+  financeMetrics,
+  refundOutstanding,
+  platformData,
+  type PlatformCommand,
+} from "./platform";
+import { OperationsPanel } from "./components/OperationsPanel";
+import { FinancePanel, FinanceSummary } from "./components/FinancePanel";
 import { loadState } from "./storage";
 import { CustomerShop, SaleDetail } from "./components/CustomerShop";
 type Page =
@@ -41,19 +51,29 @@ type Page =
   | "Cảnh báo"
   | "Khách mua cà phê"
   | "Đơn hàng"
-  | "Báo cáo";
+  | "Báo cáo"
+  | "Vận hành robot"
+  | "Đối soát";
 export default function App() {
+  const [actorId, setActorId] = useState("manager");
+  const actor = profiles.find((p) => p.id === actorId)!;
+  const hasFinance = canFinance(actor);
   const [store, dispatch] = useReducer(
     (
       current: { state: ReturnType<typeof loadState>; error?: string },
-      command: Command,
-    ) => transition(current.state, command),
+      action: { command: PlatformCommand; actorId: string },
+    ) =>
+      execute(
+        current.state,
+        action.command,
+        profiles.find((p) => p.id === action.actorId)!,
+      ),
     undefined,
     () => ({ state: loadState(), error: undefined }),
   );
-  const state = store.state;
+  const state = scopedState(store.state, actor);
   const robots = state.robots;
-  const send = (command: Command) => dispatch(command);
+  const send = (command: PlatformCommand) => dispatch({ command, actorId });
   const [storageError, setStorageError] = useState("");
   const [page, setPage] = useState<Page>("Tổng quan");
   const [city, setCity] = useState("Tất cả khu vực");
@@ -70,14 +90,14 @@ export default function App() {
   const [alertTab, setAlertTab] = useState("all");
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store.state));
       setStorageError("");
     } catch {
       setStorageError(
         "Không lưu được dữ liệu trên trình duyệt. Hãy giữ trang mở; thay đổi có thể mất khi tải lại.",
       );
     }
-  }, [state]);
+  }, [store.state]);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(""), 3500);
@@ -129,7 +149,28 @@ export default function App() {
   const scopedSales = state.sales.filter(
     (o) => city === "Tất cả khu vực" || o.city === city,
   );
-  const metrics = salesMetrics(scopedSales, period);
+  const financialState = {
+    ...state,
+    robots: scoped,
+    sales: scopedSales,
+    platform: {
+      ...platformData(state),
+      refunds: platformData(state).refunds.filter((ref) =>
+        scopedSales.some((o) => o.id === ref.orderId),
+      ),
+      history: platformData(state).history.filter((h) =>
+        scoped.some((r) => r.id === h.robotId),
+      ),
+      batches: platformData(state).batches.filter((b) =>
+        scoped.some((r) => robotScope(r.id).siteId === b.scope.siteId),
+      ),
+    },
+  };
+  const moneyMetrics = financeMetrics(financialState, period);
+  const metrics = {
+    ...salesMetrics(scopedSales, period),
+    refundRequired: moneyMetrics.outstandingRefund,
+  };
   const periodSales = scopedSales.filter((o) => {
     // Include orders with any activity in the selected reporting window.
     return (
@@ -145,6 +186,10 @@ export default function App() {
     setStatus("all");
   };
   function exportCsv() {
+    if (!hasFinance) {
+      setToast("Vai trò này không có quyền xuất dữ liệu tài chính.");
+      return;
+    }
     const rows = [
       [
         "Dữ liệu giả lập",
@@ -163,6 +208,9 @@ export default function App() {
         "Tiền thu đơn mới",
         "Cần hoàn đơn mới",
         "Doanh thu đơn mới",
+        "Giá trị đơn mới",
+        "Đã hoàn",
+        "Đã đối soát sao kê mẫu",
       ],
       ...displayRobots.map((r) => [
         r.id,
@@ -183,6 +231,15 @@ export default function App() {
           state.sales.filter((o) => o.robotId === r.id),
           period,
         ).revenue,
+        aggregateFinance(financialState, "robot", period).find(
+          (m) => m.id === r.id,
+        )?.orderValue ?? 0,
+        aggregateFinance(financialState, "robot", period).find(
+          (m) => m.id === r.id,
+        )?.refunded ?? 0,
+        aggregateFinance(financialState, "robot", period).find(
+          (m) => m.id === r.id,
+        )?.settled ?? 0,
       ]),
     ];
     const url = URL.createObjectURL(
@@ -208,6 +265,10 @@ export default function App() {
     setToast("Đã xuất báo cáo CSV");
   }
   const openRefill = (id: string, index: number) => {
+    if (!canOperate(actor)) {
+      setToast("Không có quyền bổ sung nguyên liệu.");
+      return;
+    }
     setAmount(25);
     setRefill({ id, index });
   };
@@ -246,31 +307,56 @@ export default function App() {
               [Coffee, "Khách mua cà phê"],
               [ShoppingBag, "Đơn hàng"],
               [Wallet, "Báo cáo"],
+              [Activity, "Vận hành robot"],
+              [Wallet, "Đối soát"],
             ] as const
-          ).map(([Icon, label]) => (
-            <button
-              key={label}
-              className={page === label ? "nav-item active" : "nav-item"}
-              onClick={() => navigate(label)}
-            >
-              <Icon size={20} />
-              {label}
-              {label === "Cảnh báo" && alerts.length > 0 && (
-                <b>{alerts.length}</b>
-              )}
-            </button>
-          ))}
+          )
+            .filter(
+              ([, label]) =>
+                (hasFinance ||
+                  ![
+                    "Tổng quan",
+                    "Đơn hàng",
+                    "Báo cáo",
+                    "Đối soát",
+                    "Khách mua cà phê",
+                  ].includes(label)) &&
+                (actor.role === "manager" || label !== "Khách mua cà phê"),
+            )
+            .map(([Icon, label]) => (
+              <button
+                key={label}
+                className={page === label ? "nav-item active" : "nav-item"}
+                onClick={() => navigate(label)}
+              >
+                <Icon size={20} />
+                {label}
+                {label === "Cảnh báo" && alerts.length > 0 && (
+                  <b>{alerts.length}</b>
+                )}
+              </button>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="system">
             <span className="live-dot" />
-            <span>Hệ thống vận hành ổn định</span>
+            <span>
+              {alerts.length
+                ? "Có robot cần kiểm tra"
+                : "Hệ thống vận hành ổn định"}
+            </span>
           </div>
           <div className="profile">
             <span className="avatar">HN</span>
             <div>
               <strong>Hoàng Nguyễn</strong>
-              <small>Quản lý chuỗi</small>
+              <small>
+                {actor.role === "provider"
+                  ? "Provider Operations"
+                  : actor.role === "owner"
+                    ? "Business Owner"
+                    : "Chain Manager"}
+              </small>
             </div>
             <Settings size={17} aria-label="Tài khoản mẫu" />
           </div>
@@ -284,6 +370,33 @@ export default function App() {
             <strong>{page}</strong>
           </div>
           <div className="top-actions">
+            <label className="role-picker">
+              Vai trò demo
+              <select
+                aria-label="Vai trò demo"
+                value={actorId}
+                onChange={(e) => {
+                  setActorId(e.target.value);
+                  setSelected(null);
+                  setRefill(null);
+                  setQuery("");
+                  setStatus("all");
+                  setCity("Tất cả khu vực");
+                  setToast("");
+                  setPage(
+                    e.target.value === "provider"
+                      ? "Vận hành robot"
+                      : "Tổng quan",
+                  );
+                }}
+              >
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <span className="demo">
               <i /> Dữ liệu mẫu
             </span>
@@ -332,12 +445,18 @@ export default function App() {
                             ? "Theo dõi đơn, thanh toán, kết quả pha và khoản cần hoàn."
                             : page === "Báo cáo"
                               ? "Doanh thu, tiền thu và hoàn tiền từ cùng một nguồn dữ liệu."
-                              : "Theo dõi sự cố và những điểm bán cần được chú ý."}
+                              : page === "Đối soát"
+                                ? "Theo dõi thanh toán, hoàn tiền, sao kê mẫu và chênh lệch."
+                                : page === "Vận hành robot"
+                                  ? "Theo dõi sự cố, người phụ trách và kết quả khôi phục."
+                                  : "Theo dõi sự cố và những điểm bán cần được chú ý."}
               </p>
             </div>
-            <button className="button" onClick={exportCsv}>
-              <ArrowDownToLine size={16} /> Xuất báo cáo
-            </button>
+            {hasFinance && (
+              <button className="button" onClick={exportCsv}>
+                <ArrowDownToLine size={16} /> Xuất báo cáo
+              </button>
+            )}
           </div>
           <div className="filters">
             <div className="filter-left">
@@ -400,33 +519,39 @@ export default function App() {
                   {statusLabel[robot.status]}
                 </span>
               </div>
-              <div className="stats three">
-                <Stat
-                  title="Doanh thu robot"
-                  value={money(robot.revenue)}
-                  icon={<Wallet size={20} />}
-                  note={period}
-                />
-                <Stat
-                  title="Đơn hàng thành công"
-                  value={robot.orders.toLocaleString("vi-VN")}
-                  icon={<ShoppingBag size={20} />}
-                  note={period}
-                />
-                <Stat
-                  title="Giá trị trung bình / đơn"
-                  value={money(robot.orders ? robot.revenue / robot.orders : 0)}
-                  icon={<Coffee size={20} />}
-                  note="Theo dữ liệu mô phỏng"
-                />
-              </div>
-              <section className="panel">
-                <PanelHeading
-                  title="Doanh thu theo thời gian"
-                  subtitle="Đơn vị: triệu đồng"
-                />
-                <Chart period={period} base={robot.revenue} />
-              </section>
+              {hasFinance && (
+                <>
+                  <div className="stats three">
+                    <Stat
+                      title="Doanh thu robot"
+                      value={money(robot.revenue)}
+                      icon={<Wallet size={20} />}
+                      note={period}
+                    />
+                    <Stat
+                      title="Đơn hàng thành công"
+                      value={robot.orders.toLocaleString("vi-VN")}
+                      icon={<ShoppingBag size={20} />}
+                      note={period}
+                    />
+                    <Stat
+                      title="Giá trị trung bình / đơn"
+                      value={money(
+                        robot.orders ? robot.revenue / robot.orders : 0,
+                      )}
+                      icon={<Coffee size={20} />}
+                      note="Theo dữ liệu mô phỏng"
+                    />
+                  </div>
+                  <section className="panel">
+                    <PanelHeading
+                      title="Doanh thu theo thời gian"
+                      subtitle="Đơn vị: triệu đồng"
+                    />
+                    <Chart period={period} base={robot.revenue} />
+                  </section>
+                </>
+              )}
               <section className="panel inventory-detail">
                 <PanelHeading
                   title="Nguyên liệu của robot"
@@ -437,6 +562,7 @@ export default function App() {
                     key={i}
                     value={v}
                     name={ingredients[i]}
+                    canRefill={canOperate(actor)}
                     onRefill={() => openRefill(robot.id, i)}
                   />
                 ))}
@@ -444,6 +570,41 @@ export default function App() {
             </>
           ) : (
             <>
+              {page === "Vận hành robot" && (
+                <OperationsPanel
+                  key={actor.id}
+                  state={{
+                    ...state,
+                    robots: scoped,
+                    incidents: state.incidents.filter((i) =>
+                      scoped.some((r) => r.id === i.robotId),
+                    ),
+                    platform: {
+                      ...platformData(state),
+                      tickets: platformData(state).tickets.filter((t) =>
+                        scoped.some((r) => r.id === t.robotId),
+                      ),
+                      history: platformData(state).history.filter((h) =>
+                        scoped.some((r) => r.id === h.robotId),
+                      ),
+                    },
+                  }}
+                  actor={actor}
+                  send={send}
+                />
+              )}
+              {page === "Đối soát" && hasFinance && (
+                <FinancePanel
+                  key={actor.id}
+                  state={financialState}
+                  actor={actor}
+                  period={period}
+                  send={send}
+                />
+              )}
+              {(page === "Tổng quan" || page === "Báo cáo") && hasFinance && (
+                <FinanceSummary state={financialState} period={period} />
+              )}
               {page === "Khách mua cà phê" && (
                 <CustomerShop state={state} send={send} />
               )}
@@ -457,7 +618,13 @@ export default function App() {
                     [...periodSales]
                       .reverse()
                       .map((order) => (
-                        <SaleDetail key={order.id} order={order} send={send} />
+                        <SaleDetail
+                          key={order.id}
+                          order={order}
+                          send={send}
+                          canSimulate={actor.role === "manager"}
+                          refundRemaining={refundOutstanding(state, order.id)}
+                        />
                       ))
                   ) : (
                     <div className="empty">Chưa có đơn mô phỏng trong kỳ.</div>
@@ -480,7 +647,7 @@ export default function App() {
                       <strong>{money(metrics.captured)}</strong>
                     </p>
                     <p>
-                      Cần xử lý hoàn tiền
+                      Cần xử lý hoàn tiền (mọi kỳ)
                       <strong>{money(metrics.refundRequired)}</strong>
                     </p>
                     <p>
@@ -503,6 +670,7 @@ export default function App() {
                     subtitle="Cùng nguồn số liệu với dashboard và CSV; bao gồm nền lịch sử minh họa."
                   />
                   <RobotTable
+                    showFinance={hasFinance}
                     robots={displayRobots}
                     onSelect={(r) => setSelected(r.id)}
                   />
@@ -661,6 +829,7 @@ export default function App() {
                     </label>
                   </div>
                   <RobotTable
+                    showFinance={hasFinance}
                     robots={displayRobots}
                     onSelect={(r) => setSelected(r.id)}
                   />
@@ -714,6 +883,7 @@ export default function App() {
                             key={i}
                             name={ingredients[i]}
                             value={v}
+                            canRefill={canOperate(actor)}
                             onRefill={() => openRefill(r.id, i)}
                           />
                         ))}
@@ -747,16 +917,32 @@ export default function App() {
                     ))}
                   </div>
                   {state.incidents
-                    .filter((i) => scoped.some((r) => r.id === i.robotId))
+                    .filter(
+                      (i) =>
+                        scoped.some((r) => r.id === i.robotId) &&
+                        !platformData(state).tickets.some(
+                          (t) =>
+                            t.incidentId === i.id && t.status === "resolved",
+                        ),
+                    )
                     .map((i) => (
                       <div className="alert-row" key={i.id}>
                         <Activity size={21} />
                         <div>
-                          <strong>Sự cố pha chế</strong>
+                          <strong>
+                            {i.orderId ? "Sự cố pha chế" : "Sự cố robot"}
+                          </strong>
                           <p>{i.message}</p>
                           <p>
-                            Robot {i.robotId} · Đơn {i.orderId} · Cần xử lý hoàn
-                            tiền, chưa tự khôi phục robot.
+                            Robot {i.robotId}
+                            {i.orderId && ` · Đơn ${i.orderId}`} · Chưa giải
+                            quyết.
+                            <button
+                              className="text-button"
+                              onClick={() => navigate("Vận hành robot")}
+                            >
+                              Xem phiếu xử lý
+                            </button>
                           </p>
                         </div>
                       </div>
@@ -786,6 +972,7 @@ export default function App() {
                         {a.kind === "stock" ? (
                           <button
                             className="button"
+                            disabled={!canOperate(actor)}
                             onClick={() => openRefill(a.robot.id, a.index)}
                           >
                             Bổ sung
@@ -793,7 +980,7 @@ export default function App() {
                         ) : (
                           <button
                             className="button"
-                            disabled={ack.includes(a.id)}
+                            disabled={!canOperate(actor) || ack.includes(a.id)}
                             onClick={() => {
                               setAck([...ack, a.id]);
                               setToast(

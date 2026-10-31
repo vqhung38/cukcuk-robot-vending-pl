@@ -1,3 +1,4 @@
+import { robotScope } from "./access";
 import { initialRobots, type Robot } from "./data";
 import { freshState, STORAGE_KEY, type SalesState } from "./sales";
 function validRobots(value: unknown): value is Robot[] {
@@ -52,7 +53,7 @@ export function loadState(): SalesState {
           !Array.isArray(o.bom) ||
           o.bom.length !== 4 ||
           o.bom.some((n: number) => !Number.isFinite(n) || n < 0) ||
-          !["pending", "succeeded", "failed"].includes(o.payment) ||
+          !["pending", "succeeded", "failed", "unknown"].includes(o.payment) ||
           ![
             "awaiting_payment",
             "paid",
@@ -83,7 +84,31 @@ export function loadState(): SalesState {
         )
       )
         throw new Error("invalid");
-      return s;
+      if (
+        s.platform &&
+        ![
+          s.platform.tickets,
+          s.platform.history,
+          s.platform.refunds,
+          s.platform.batches,
+        ].every(Array.isArray)
+      )
+        throw new Error("invalid platform");
+      return {
+        ...s,
+        sales: s.sales.map(
+          (o: {
+            id: string;
+            robotId: string;
+            scope?: unknown;
+            paymentId?: string;
+          }) => ({
+            ...o,
+            scope: o.scope ?? robotScope(o.robotId),
+            paymentId: o.paymentId ?? `PAY-${o.id}`,
+          }),
+        ),
+      };
     }
     const legacy = JSON.parse(localStorage.getItem("cukcuk-v1") || "null");
     return freshState(validRobots(legacy) ? legacy : initialRobots);

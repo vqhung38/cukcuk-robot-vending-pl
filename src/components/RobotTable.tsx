@@ -4,10 +4,12 @@ export function RobotTable({
   robots,
   onSelect,
   multiplier = 1,
+  showFinance = true,
 }: {
   robots: Robot[];
   onSelect: (r: Robot) => void;
   multiplier?: number;
+  showFinance?: boolean;
 }) {
   return (
     <div className="table-wrap">
@@ -16,8 +18,12 @@ export function RobotTable({
           <tr>
             <th>ROBOT / ĐIỂM BÁN</th>
             <th>TRẠNG THÁI</th>
-            <th>ĐƠN HÀNG</th>
-            <th>DOANH THU</th>
+            {showFinance && (
+              <>
+                <th>ĐƠN HÀNG</th>
+                <th>DOANH THU</th>
+              </>
+            )}
             <th>NGUYÊN LIỆU</th>
             <th />
           </tr>
@@ -44,13 +50,17 @@ export function RobotTable({
                   {statusLabel[r.status]}
                 </span>
               </td>
-              <td>
-                {(r.orders * multiplier).toLocaleString("vi-VN")}
-                <small>đơn hàng</small>
-              </td>
-              <td>
-                <strong>{money(r.revenue * multiplier)}</strong>
-              </td>
+              {showFinance && (
+                <>
+                  <td>
+                    {(r.orders * multiplier).toLocaleString("vi-VN")}
+                    <small>đơn hàng</small>
+                  </td>
+                  <td>
+                    <strong>{money(r.revenue * multiplier)}</strong>
+                  </td>
+                </>
+              )}
               <td>
                 <div className="mini-stock">
                   {r.stock.map((v, i) => (

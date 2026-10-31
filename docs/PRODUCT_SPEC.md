@@ -160,3 +160,7 @@ Repository hiện là demo React/localStorage; chưa chứng minh đáp ứng đ
 Theo yêu cầu triển khai tiếp theo, bổ sung `sales.ts` và trang Khách mua cà phê/Đơn hàng/Báo cáo. Truy vết: E2E-02 → SC-02.01/02/03/04 → PBIs!r15/19/20/21/22/24 (chỉ một phần), BR03/04/06/07/08/10/20; E2E-03/04 nhận kết quả tiêu hao và số liệu. Không coi lưu localStorage là Edge–Cloud sync thật.
 
 Mỗi đơn hiện chỉ một loại đồ uống × số lượng, từng ly có ID/kết quả độc lập, reserve lúc tạo và consume khi thành công. Doanh thu ghi theo ly thành công, đơn hoàn tất khi tất cả ly tốt. Ly lỗi giữ tiền capture và khoản cần hoàn, không hoàn tự động; không tiêu hao ly lỗi theo giả định demo hiện tại. Kết quả các ly đã bắt đầu có thể xác nhận riêng sau một ly lỗi, còn robot bị khóa nhận đơn mới. Các giả định/giới hạn và hướng dẫn demo chi tiết ở [README](../README.md). Lưu snapshot chỉ hỗ trợ một trình duyệt/tab, chưa có quyền production.
+
+## 12. Hai vertical slice vận hành và đối soát
+
+Đã được người dùng cho phép triển khai: sự cố/cảnh báo/phiếu/phân công/tiến độ/kết quả/khôi phục và lịch sử; payment/refund, tổng hợp nhiều cấp, kỳ đối soát/chênh lệch/chốt/bổ sung, role scope. Quy tắc thực thi và các giả định mới, bao gồm Owner được mô phỏng hoàn/chốt thay vì mặc định chỉ đọc, được ghi tại [OPERATIONS_FINANCE_SLICES.md](OPERATIONS_FINANCE_SLICES.md). Đây là phần mở rộng được chọn để demo, không ghi đè yêu cầu nền tảng chưa triển khai như P&L/HĐĐT/OTA/đối soát tích hợp thật.
